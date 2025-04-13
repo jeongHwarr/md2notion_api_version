@@ -1,3 +1,4 @@
+import re
 from mistletoe.block_token import BlockToken, tokenize
 import itertools
 from mistletoe import span_token
@@ -52,12 +53,83 @@ class Document(BlockToken):
         _root_node = None
 
 def read_file(file_path):
+    """
+    Reads a markdown file, extracts equations, renders to Notion-compatible blocks,
+    and restores equations into the final rendered output.
+    """
     with open(file_path, "r", encoding="utf-8") as mdFile:
-        with NotionPyRenderer() as renderer:
-            a  = Document(mdFile)
-            out= renderer.render(a)
-    return out
+        text_lines = mdFile.readlines()
 
-if __name__ == '__main__':
+        # 1. Extract and replace equations with placeholders
+        equations, placeholders, text_with_placeholders = extract_equations(text_lines)
+
+        # 2. Create Mistletoe Document and render with Notion renderer
+        doc = Document(text_with_placeholders)
+        with NotionPyRenderer() as renderer:
+            rendered = renderer.render(doc)
+
+        # 3. Restore equations in rendered Notion blocks
+        rendered = restore_equations_in_rendered(rendered, equations, placeholders)
+
+    return rendered
+
+def extract_equations(text_lines):
+    """
+    Extracts LaTeX equations from the text and replaces them with placeholders.
+
+    Supports both:
+    - Multi-line math blocks (with standalone `$$` lines)
+    - Inline math blocks (on a single line like `$$...$$`)
+    """
+    equations = []
+    placeholders = []
+    new_lines = []
+
+    in_equation = False
+    buffer = []
+
+    for line in text_lines:
+        # Handle multi-line equations that start and end with '$$' on separate lines
+        if line.strip() == "$$":
+            if not in_equation:
+                in_equation = True
+                buffer = []
+            else:
+                in_equation = False
+                equation = "\n".join(buffer).strip()
+                placeholder = f"**EQUATION_{len(equations)}**"
+                equations.append(f"$$\n{equation}\n$$")
+                placeholders.append(placeholder)
+                new_lines.append(placeholder + "\n")
+        elif in_equation:
+            buffer.append(line.strip())
+        else:
+            # Detect and replace inline equations like '$$...$$' with placeholders
+            def replace_inline_equation(match):
+                equation = match.group(0)
+                placeholder = f"**EQUATION_{len(equations)}**"
+                equations.append(equation)
+                placeholders.append(placeholder)
+                return placeholder
+
+            modified_line = re.sub(r"\$\$(.+?)\$\$", replace_inline_equation, line)
+            new_lines.append(modified_line)
+
+    return equations, placeholders, new_lines
+
+def restore_equations_in_rendered(rendered, equations, placeholders):
+    """
+    After rendering the document, restore equations by replacing placeholders
+    in the Notion-compatible block structure.
+    """
+    for item in rendered:
+        if "title" in item:
+            for eq, ph in zip(equations, placeholders):
+                item["title"] = item["title"].replace(ph, eq)
+        if "children" in item:
+            restore_equations_in_rendered(item["children"], equations, placeholders)
+    return rendered
+
+if __name__ == "__main__":
     for block in read_file("test.md"):
         print(block)
