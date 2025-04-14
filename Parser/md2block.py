@@ -112,7 +112,15 @@ def extract_equations(text_lines):
                 placeholders.append(placeholder)
                 return placeholder
 
+            # 먼저 $$...$$ 처리
             modified_line = re.sub(r"\$\$(.+?)\$\$", replace_inline_equation, line)
+            # 그리고 $...$ 처리 (단, 이미 $$...$$ 안에 있는 경우는 방지됨)
+            modified_line = re.sub(
+                r"(?<!\$)\$(?!\$)(.+?)(?<!\$)\$(?!\$)",
+                replace_inline_equation,
+                modified_line,
+            )
+
             new_lines.append(modified_line)
 
     return equations, placeholders, new_lines
